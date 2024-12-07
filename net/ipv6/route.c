@@ -2897,12 +2897,13 @@ static void __ip6_rt_update_pmtu(struct dst_entry *dst, const struct sock *sk,
 		res.fib6_flags = res.f6i->fib6_flags;
 		res.fib6_type = res.f6i->fib6_type;
 
-		if (res.f6i->nh) {
+
+     if (res.f6i->nh) {
 			struct fib6_nh_match_arg arg = {
 				.dev = dst->dev,
 				.gw = &rt6->rt6i_gateway,
 			};
-
+			printk(KERN_WARNING "if");
 			nexthop_for_each_fib6_nh(res.f6i->nh,
 						 fib6_nh_find_match, &arg);
 
@@ -2913,10 +2914,24 @@ static void __ip6_rt_update_pmtu(struct dst_entry *dst, const struct sock *sk,
 				goto out_unlock;
 
 			res.nh = arg.match;
-		} else {
-			res.nh = res.f6i->fib6_nh;
-		}
+	   } else {
 
+			int nhsel;
+			printk(KERN_WARNING "else");
+			for (nhsel = 0; nhsel < fib6_info_num_path(res.f6i); nhsel++) {
+				struct fib6_nh *f6nh =  &res.f6i->fib6_nh[nhsel];
+
+				res.nh = f6nh;
+				nrt6 = ip6_rt_cache_alloc(&res, daddr, saddr);
+				if (nrt6) {
+					rt6_do_update_pmtu(nrt6, mtu);
+					if (rt6_insert_exception(nrt6, &res))
+						dst_release_immediate(&nrt6->dst);
+				}
+			}
+			goto out_unlock;
+           
+       }	
 		nrt6 = ip6_rt_cache_alloc(&res, daddr, saddr);
 		if (nrt6) {
 			rt6_do_update_pmtu(nrt6, mtu);
@@ -2927,6 +2942,7 @@ out_unlock:
 		rcu_read_unlock();
 	}
 }
+
 
 static void ip6_rt_update_pmtu(struct dst_entry *dst, struct sock *sk,
 			       struct sk_buff *skb, u32 mtu,
@@ -5954,9 +5970,19 @@ int rt6_dump_route(struct fib6_info *rt, void *p_arg, unsigned int skip)
 		int err;
 
 		rcu_read_lock();
-		err = nexthop_for_each_fib6_nh(rt->nh,
+		if (rt->nh) {
+			printk(KERN_WARNING "dumpif");
+			err = nexthop_for_each_fib6_nh(rt->nh,
 						       rt6_nh_dump_exceptions,
 						       &w);
+		} else {
+			int nhsel;
+			printk(KERN_WARNING "dumpelse");
+			for (nhsel = 0; nhsel < fib6_info_num_path(rt); nhsel++) {
+				struct fib6_nh *f6nh = &rt->fib6_nh[nhsel];
+				err = rt6_nh_dump_exceptions(f6nh, &w);
+			}
+		}
 		rcu_read_unlock();
 
 		if (err)

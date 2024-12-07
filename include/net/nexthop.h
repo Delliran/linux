@@ -481,6 +481,14 @@ static inline unsigned int fib_info_num_path(const struct fib_info *fi)
 	return fi->fib_nhs;
 }
 
+static inline unsigned int fib6_info_num_path(const struct fib6_info *fi)
+{
+	if (unlikely(fi->nh))
+		return nexthop_num_path(fi->nh);
+
+	return 0;
+}
+
 int fib_check_nexthop(struct nexthop *nh, u8 scope,
 		      struct netlink_ext_ack *extack);
 
