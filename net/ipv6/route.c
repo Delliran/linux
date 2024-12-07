@@ -5954,13 +5954,9 @@ int rt6_dump_route(struct fib6_info *rt, void *p_arg, unsigned int skip)
 		int err;
 
 		rcu_read_lock();
-		if (rt->nh) {
-			err = nexthop_for_each_fib6_nh(rt->nh,
+		err = nexthop_for_each_fib6_nh(rt->nh,
 						       rt6_nh_dump_exceptions,
 						       &w);
-		} else {
-			err = rt6_nh_dump_exceptions(rt->fib6_nh, &w);
-		}
 		rcu_read_unlock();
 
 		if (err)
