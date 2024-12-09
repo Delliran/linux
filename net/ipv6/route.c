@@ -1991,7 +1991,15 @@ static void rt6_update_exception_stamp_rt(struct rt6_info *rt)
 			goto unlock;
 		fib6_nh = arg.match;
 	} else {
-		fib6_nh = from->fib6_nh;
+			int nhsel;
+			printk(KERN_WARNING "elsestamp");
+			for (nhsel = 0; nhsel < fib6_info_num_path(from); nhsel++) {
+				fib6_nh =  &from->fib6_nh[nhsel];
+
+				fib6_nh_update_exception(fib6_nh, from->fib6_src.plen, rt);
+			}
+			goto unlock;
+
 	}
 	fib6_nh_update_exception(fib6_nh, from->fib6_src.plen, rt);
 unlock:
@@ -2888,6 +2896,7 @@ static void __ip6_rt_update_pmtu(struct dst_entry *dst, const struct sock *sk,
 	} else if (daddr) {
 		struct fib6_result res = {};
 		struct rt6_info *nrt6;
+		int nhsel;
 
 		rcu_read_lock();
 		res.f6i = rcu_dereference(rt6->from);
@@ -2897,7 +2906,7 @@ static void __ip6_rt_update_pmtu(struct dst_entry *dst, const struct sock *sk,
 		res.fib6_flags = res.f6i->fib6_flags;
 		res.fib6_type = res.f6i->fib6_type;
 
-
+	for (nhsel = 0; nhsel < fib6_info_num_path(res.f6i); nhsel++) {
      if (res.f6i->nh) {
 			struct fib6_nh_match_arg arg = {
 				.dev = dst->dev,
@@ -2915,22 +2924,7 @@ static void __ip6_rt_update_pmtu(struct dst_entry *dst, const struct sock *sk,
 
 			res.nh = arg.match;
 	   } else {
-
-			int nhsel;
-			printk(KERN_WARNING "else");
-			for (nhsel = 0; nhsel < fib6_info_num_path(res.f6i); nhsel++) {
-				struct fib6_nh *f6nh =  &res.f6i->fib6_nh[nhsel];
-
-				res.nh = f6nh;
-				nrt6 = ip6_rt_cache_alloc(&res, daddr, saddr);
-				if (nrt6) {
-					rt6_do_update_pmtu(nrt6, mtu);
-					if (rt6_insert_exception(nrt6, &res))
-						dst_release_immediate(&nrt6->dst);
-				}
-			}
-			goto out_unlock;
-           
+			res.nh = &res.f6i->fib6_nh[nhsel];
        }	
 		nrt6 = ip6_rt_cache_alloc(&res, daddr, saddr);
 		if (nrt6) {
@@ -2938,6 +2932,8 @@ static void __ip6_rt_update_pmtu(struct dst_entry *dst, const struct sock *sk,
 			if (rt6_insert_exception(nrt6, &res))
 				dst_release_immediate(&nrt6->dst);
 		}
+
+			}
 out_unlock:
 		rcu_read_unlock();
 	}
@@ -4986,9 +4982,18 @@ static int rt6_mtu_change_route(struct fib6_info *f6i, void *p_arg)
 		/* fib6_nh_mtu_change only returns 0, so this is safe */
 		return nexthop_for_each_fib6_nh(f6i->nh, fib6_nh_mtu_change,
 						arg);
+	} else {
+			int nhsel;
+			printk(KERN_WARNING "else");
+			for (nhsel = 0; nhsel < fib6_info_num_path(f6i); nhsel++) {
+				struct fib6_nh *f6nh =  &f6i->fib6_nh[nhsel];
+
+				fib6_nh_mtu_change(f6nh, arg);
+			}
+			return 0;
+
 	}
 
-	return fib6_nh_mtu_change(f6i->fib6_nh, arg);
 }
 
 void rt6_mtu_change(struct net_device *dev, unsigned int mtu)

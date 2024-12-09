@@ -2482,7 +2482,8 @@ test_pmtu_ipvX_mp_exceptions() {
 	# Check that exceptions have been created with the correct PMTU
 	pmtu_a_R1="$(route_get_dst_pmtu_from_exception "${ns_a}" "${dst}" oif veth_A-R1)"
 	pmtu_a_R2="$(route_get_dst_pmtu_from_exception "${ns_a}" "${dst}" oif veth_A-R2)"
-
+	run_cmd ${ns_a} ip route get "${dst}" oif veth_A-R1
+	run_cmd ${ns_a} ip route get "${dst}" oif veth_A-R2
 	check_pmtu_value "1500" "${pmtu_a_R1}" "exceeding MTU (veth_A-R1)" || return 1
 	check_pmtu_value "1500" "${pmtu_a_R2}" "exceeding MTU (veth_A-R2)" || return 1
 }
