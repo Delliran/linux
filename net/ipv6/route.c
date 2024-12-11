@@ -4952,7 +4952,13 @@ static int fib6_nh_mtu_change(struct fib6_nh *nh, void *_arg)
 			fib6_metric_set(f6i, RTAX_MTU, arg->mtu);
 
 		spin_lock_bh(&rt6_exception_lock);
-		rt6_exceptions_update_pmtu(idev, nh, arg->mtu);
+			int nhsel;
+			printk(KERN_WARNING "elsestamp");
+			for (nhsel = 0; nhsel < fib6_info_num_path(f6i); nhsel++) {
+				struct fib6_nh fib6_nh = f6i->fib6_nh[nhsel];
+
+				rt6_exceptions_update_pmtu(idev, nh, arg->mtu);
+			}
 		spin_unlock_bh(&rt6_exception_lock);
 	}
 
