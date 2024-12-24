@@ -2475,7 +2475,7 @@ test_pmtu_ipvX_mp_exceptions() {
 	mtu "${ns_r2}" veth_R2-A 2000
 	mtu "${ns_r2}" veth_R2-B 1500
 	mtu "${ns_b}"  veth_B-R2 1500
-
+	echo ${USE_NH} > /dev/kmsg
 	# Ping and expect two nexthop exceptions for two routes
 	run_cmd ${ns_a} ${ping} -q -M want -i 0.1 -c 1 -s 1800 "${dst}"
 

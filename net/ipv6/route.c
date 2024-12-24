@@ -4939,10 +4939,7 @@ static int fib6_nh_mtu_change(struct fib6_nh *nh, void *_arg)
 		    (mtu < arg->mtu && mtu == idev->cnf.mtu6))
 			fib6_metric_set(f6i, RTAX_MTU, arg->mtu);
 
-		spin_lock_bh(&rt6_exception_lock);
-		if (f6i->nh) {
-			rnexthop_for_each_fib6_nh(f6i->nh, fib6_nh_mtu_change, arg);
-		}
+		spin_lock_bh(&rt6_exception_lock);g
 		rt6_exceptions_update_pmtu(idev, nh, arg->mtu);
 		spin_unlock_bh(&rt6_exception_lock);
 	}
