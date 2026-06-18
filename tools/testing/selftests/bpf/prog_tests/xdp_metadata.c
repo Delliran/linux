@@ -310,6 +310,12 @@ static int verify_xsk_metadata(struct xsk *xsk, bool sent_from_af_xdp)
 	if (!ASSERT_NEQ(meta->rx_hash, 0, "rx_hash"))
 		return -1;
 
+	/* veth surfaces the checksum verdict from skb->ip_summed; packets
+	 * crossing veth arrive checksum-verified.
+	 */
+	if (!ASSERT_EQ(meta->rx_csum_status, XDP_META_CSUM_VERIFIED, "rx_csum_status"))
+		return -1;
+
 	if (!sent_from_af_xdp) {
 		if (!ASSERT_NEQ(meta->rx_hash_type & XDP_RSS_TYPE_L4, 0, "rx_hash_type"))
 			return -1;

@@ -28,7 +28,12 @@ enum xdp_meta_field {
 	XDP_META_FIELD_TS	= BIT(0),
 	XDP_META_FIELD_RSS	= BIT(1),
 	XDP_META_FIELD_VLAN_TAG	= BIT(2),
+	XDP_META_FIELD_CSUM	= BIT(3),
 };
+
+/* Mirror of enum xdp_csum_status (include/net/xdp.h) for userspace asserts. */
+#define XDP_META_CSUM_NONE	0
+#define XDP_META_CSUM_VERIFIED	1
 
 struct xdp_meta {
 	union {
@@ -47,6 +52,10 @@ struct xdp_meta {
 			__u16 rx_vlan_tci;
 		};
 		__s32 rx_vlan_tag_err;
+	};
+	union {
+		__u32 rx_csum_status;
+		__s32 rx_csum_err;
 	};
 	enum xdp_meta_field hint_valid;
 };

@@ -33,6 +33,8 @@ extern int bpf_xdp_metadata_rx_hash(const struct xdp_md *ctx, __u32 *hash,
 extern int bpf_xdp_metadata_rx_vlan_tag(const struct xdp_md *ctx,
 					__be16 *vlan_proto,
 					__u16 *vlan_tci) __ksym;
+extern int bpf_xdp_metadata_rx_csum(const struct xdp_md *ctx,
+				    enum xdp_csum_status *csum_status) __ksym;
 
 SEC("xdp")
 int rx(struct xdp_md *ctx)
@@ -98,6 +100,16 @@ int rx(struct xdp_md *ctx)
 	bpf_xdp_metadata_rx_hash(ctx, &meta->rx_hash, &meta->rx_hash_type);
 	bpf_xdp_metadata_rx_vlan_tag(ctx, &meta->rx_vlan_proto,
 				     &meta->rx_vlan_tci);
+
+	{
+		enum xdp_csum_status csum_status;
+
+		ret = bpf_xdp_metadata_rx_csum(ctx, &csum_status);
+		if (ret < 0)
+			meta->rx_csum_err = ret;
+		else
+			meta->rx_csum_status = csum_status;
+	}
 
 	return bpf_redirect_map(&xsk, ctx->rx_queue_index, XDP_PASS);
 }
