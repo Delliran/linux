@@ -4379,6 +4379,18 @@ static void task_tick_scx(struct rq *rq, struct task_struct *donor, int queued)
 	else if (SCX_HAS_OP(sch, tick))
 		SCX_CALL_OP_TASK(sch, tick, rq, donor);
 
+	/*
+	 * Drive the NUMA hinting-fault scan as task_tick_fair() does. Neither
+	 * the scan nor the statistics it feeds depend on the scheduling class.
+	 * Where the task then runs is left to the BPF scheduler:
+	 * numa_migrate_preferred() does not move a task it owns.
+	 *
+	 * The tick that only refreshes an already queued task does not scan,
+	 * matching the @queued check in task_tick_fair().
+	 */
+	if (!queued && static_branch_unlikely(&sched_numa_balancing))
+		task_tick_numa(rq, donor);
+
 	if (!donor->scx.slice) {
 		/* the slice can't be trusted while bypassing */
 		if (READ_ONCE(donor->scx.lazy_resched) &&
