@@ -32,7 +32,11 @@
 #include <net/netfilter/nf_conntrack_tuple.h>
 #include <net/netfilter/nf_conntrack_zones.h>
 
-#define CONNCOUNT_SLOTS		256U
+/* Number of rb-trees (and locks) a key space is spread over. Sized from
+ * the number of possible cpus at module init, see nf_conncount_modinit().
+ */
+#define CONNCOUNT_SLOTS_MIN		256U
+#define CONNCOUNT_SLOTS_MAX		8192U
 
 #define CONNCOUNT_GC_MAX_NODES		8
 #define CONNCOUNT_GC_MAX_COLLECT	64
@@ -65,13 +69,15 @@ struct nf_conncount_root {
 struct nf_conncount_data {
 	unsigned int keylen;
 	u32 initval;
-	struct nf_conncount_root root[CONNCOUNT_SLOTS];
 	struct net *net;
 	struct work_struct gc_work;
-	unsigned long pending_trees[BITS_TO_LONGS(CONNCOUNT_SLOTS)];
+	unsigned long *pending_trees;
 	unsigned int gc_tree;
+	unsigned int nr_slots;
+	struct nf_conncount_root root[] __counted_by(nr_slots);
 };
 
+static unsigned int conncount_slots __read_mostly;
 static struct kmem_cache *conncount_rb_cachep __read_mostly;
 static struct kmem_cache *conncount_conn_cachep __read_mostly;
 
@@ -571,7 +577,7 @@ count_tree(struct net *net,
 	unsigned int count, hash;
 	int ret;
 
-	hash = jhash2(key, data->keylen, data->initval) % CONNCOUNT_SLOTS;
+	hash = jhash2(key, data->keylen, data->initval) & (data->nr_slots - 1);
 	root = &data->root[hash];
 
 	rbconn = find_tree_node(root, data, key);
@@ -643,9 +649,9 @@ static void tree_gc_worker(struct work_struct *work)
 	struct rb_node *node;
 
 	if (data->gc_tree == 0)
-		data->gc_tree = find_first_bit(data->pending_trees, CONNCOUNT_SLOTS);
+		data->gc_tree = find_first_bit(data->pending_trees, data->nr_slots);
 
-	tree = data->gc_tree % CONNCOUNT_SLOTS;
+	tree = data->gc_tree & (data->nr_slots - 1);
 	root = &data->root[tree];
 
 	spin_lock_bh(&root->lock);
@@ -688,10 +694,10 @@ static void tree_gc_worker(struct work_struct *work)
 	tree_nodes_free(root, gc_nodes, gc_count);
 	clear_bit(tree, data->pending_trees);
 
-	next_tree = (tree + 1) % CONNCOUNT_SLOTS;
-	next_tree = find_next_bit(data->pending_trees, CONNCOUNT_SLOTS, next_tree);
+	next_tree = (tree + 1) & (data->nr_slots - 1);
+	next_tree = find_next_bit(data->pending_trees, data->nr_slots, next_tree);
 
-	if (next_tree < CONNCOUNT_SLOTS) {
+	if (next_tree < data->nr_slots) {
 		data->gc_tree = next_tree;
 		schedule_work(work);
 	} else {
@@ -732,18 +738,26 @@ static void nf_conncount_root_init(struct nf_conncount_root *r)
 struct nf_conncount_data *nf_conncount_init(struct net *net, unsigned int keylen)
 {
 	struct nf_conncount_data *data;
-	int i;
+	unsigned int i;
 
 	if (keylen % sizeof(u32) ||
 	    keylen / sizeof(u32) > MAX_KEYLEN ||
 	    keylen == 0)
 		return ERR_PTR(-EINVAL);
 
-	data = kvzalloc_obj(*data, GFP_KERNEL_ACCOUNT);
+	data = kvzalloc(struct_size(data, root, conncount_slots),
+			GFP_KERNEL_ACCOUNT);
 	if (!data)
 		return ERR_PTR(-ENOMEM);
 
-	for (i = 0; i < ARRAY_SIZE(data->root); ++i)
+	data->nr_slots = conncount_slots;
+	data->pending_trees = bitmap_zalloc(data->nr_slots, GFP_KERNEL_ACCOUNT);
+	if (!data->pending_trees) {
+		kvfree(data);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	for (i = 0; i < data->nr_slots; ++i)
 		nf_conncount_root_init(&data->root[i]);
 
 	data->keylen = keylen / sizeof(u32);
@@ -786,15 +800,23 @@ void nf_conncount_destroy(struct net *net, struct nf_conncount_data *data)
 
 	disable_work_sync(&data->gc_work);
 
-	for (i = 0; i < ARRAY_SIZE(data->root); ++i)
+	for (i = 0; i < data->nr_slots; ++i)
 		destroy_tree(&data->root[i]);
 
+	bitmap_free(data->pending_trees);
 	kvfree(data);
 }
 EXPORT_SYMBOL_GPL(nf_conncount_destroy);
 
 static int __init nf_conncount_modinit(void)
 {
+	/* Each slot has its own lock, so give the cpus that can be in
+	 * insert_tree() or the gc worker at the same time enough of them to
+	 * rarely collide, while a small system keeps the historical 256.
+	 */
+	conncount_slots = clamp(roundup_pow_of_two(num_possible_cpus() * 16),
+				CONNCOUNT_SLOTS_MIN, CONNCOUNT_SLOTS_MAX);
+
 	conncount_conn_cachep = KMEM_CACHE(nf_conncount_tuple, 0);
 	if (!conncount_conn_cachep)
 		return -ENOMEM;
