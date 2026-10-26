@@ -2628,6 +2628,16 @@ int nf_conntrack_set_hashsize(const char *val, const struct kernel_param *kp)
 
 int nf_conntrack_init_start(void)
 {
+	/* Once the table is full every new conntrack frees another one
+	 * through early_drop(), usually allocated by a different cpu.
+	 * Percpu sheaves keep that churn off the slab freelists and the
+	 * per-node partial lists: the freed object goes into the cpu's
+	 * sheaf and the allocation that follows takes it right back.
+	 */
+	struct kmem_cache_args cache_args = {
+		.align		= NFCT_INFOMASK + 1,
+		.sheaf_capacity	= 32,
+	};
 	unsigned long nr_pages = totalram_pages();
 	int max_factor = 8;
 	int ret = -ENOMEM;
@@ -2668,8 +2678,8 @@ int nf_conntrack_init_start(void)
 
 	nf_conntrack_cachep = kmem_cache_create("nf_conntrack",
 						sizeof(struct nf_conn),
-						NFCT_INFOMASK + 1,
-						SLAB_TYPESAFE_BY_RCU | SLAB_HWCACHE_ALIGN, NULL);
+						&cache_args,
+						SLAB_TYPESAFE_BY_RCU | SLAB_HWCACHE_ALIGN);
 	if (!nf_conntrack_cachep)
 		goto err_cachep;
 
