@@ -36,6 +36,8 @@
 
 #define CONNCOUNT_GC_MAX_NODES		8
 #define CONNCOUNT_GC_MAX_COLLECT	64
+/* Upper bound on the number of entries examined by one gc pass. */
+#define CONNCOUNT_GC_MAX_SCAN		(CONNCOUNT_GC_MAX_COLLECT * 2)
 #define MAX_KEYLEN			5
 
 /* we will save the tuples of all connections we care about */
@@ -92,6 +94,19 @@ static void conn_free(struct nf_conncount_list *list,
 	list_del(&conn->node);
 
 	kmem_cache_free(conncount_conn_cachep, conn);
+}
+
+/* A gc pass that stopped at @conn has examined every entry in front of it.
+ * Move those behind @conn so that the next pass resumes where this one
+ * stopped instead of rescanning the same live entries over and over.
+ */
+static void gc_resume_at(struct nf_conncount_list *list,
+			 struct nf_conncount_tuple *conn)
+{
+	lockdep_assert_held(&list->list_lock);
+
+	if (&conn->node != &list->head)
+		list_rotate_to_front(&conn->node, &list->head);
 }
 
 static const struct nf_conntrack_tuple_hash *
@@ -170,8 +185,10 @@ static int __nf_conncount_add(struct net *net,
 	struct nf_conncount_tuple *conn, *conn_n;
 	struct nf_conntrack_tuple tuple;
 	struct nf_conn *ct = NULL;
+	unsigned int max_scan = CONNCOUNT_GC_MAX_SCAN;
 	struct nf_conn *found_ct;
 	unsigned int collect = 0;
+	unsigned int scanned = 0;
 	bool refcounted = false;
 	int err = 0;
 
@@ -189,6 +206,10 @@ static int __nf_conncount_add(struct net *net,
 			goto out_put;
 		}
 
+		/* The entry for this connection can be anywhere in the list,
+		 * so deduplication needs a full walk.
+		 */
+		max_scan = UINT_MAX;
 		goto check_connections;
 	}
 
@@ -199,8 +220,9 @@ static int __nf_conncount_add(struct net *net,
 check_connections:
 	/* check the saved connections */
 	list_for_each_entry_safe(conn, conn_n, &list->head, node) {
-		if (collect > CONNCOUNT_GC_MAX_COLLECT)
+		if (collect > CONNCOUNT_GC_MAX_COLLECT || scanned >= max_scan)
 			break;
+		scanned++;
 
 		found = find_or_evict(net, list, conn);
 		if (IS_ERR(found)) {
@@ -241,6 +263,7 @@ check_connections:
 
 		nf_ct_put(found_ct);
 	}
+	gc_resume_at(list, conn);
 	list->last_gc = (u32)jiffies;
 	list->last_gc_count = list->count;
 
@@ -303,6 +326,7 @@ static bool __nf_conncount_gc_list(struct net *net,
 	struct nf_conncount_tuple *conn, *conn_n;
 	struct nf_conn *found_ct;
 	unsigned int collected = 0;
+	unsigned int scanned = 0;
 	bool ret = false;
 
 	/* don't bother if we just did GC */
@@ -310,6 +334,11 @@ static bool __nf_conncount_gc_list(struct net *net,
 		return false;
 
 	list_for_each_entry_safe(conn, conn_n, &list->head, node) {
+		if (collected > CONNCOUNT_GC_MAX_COLLECT ||
+		    scanned >= CONNCOUNT_GC_MAX_SCAN)
+			break;
+		scanned++;
+
 		found = find_or_evict(net, list, conn);
 		if (IS_ERR(found)) {
 			if (PTR_ERR(found) == -ENOENT)
@@ -330,9 +359,8 @@ static bool __nf_conncount_gc_list(struct net *net,
 		}
 
 		nf_ct_put(found_ct);
-		if (collected > CONNCOUNT_GC_MAX_COLLECT)
-			break;
 	}
+	gc_resume_at(list, conn);
 
 	if (!list->count)
 		ret = true;
