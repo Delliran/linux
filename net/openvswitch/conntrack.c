@@ -957,7 +957,7 @@ static int ovs_ct_check_limit(struct net *net,
 
 	connections = nf_conncount_count_skb(net, skb, info->family,
 					     ct_limit_info->data,
-					     &conncount_key);
+					     &conncount_key, per_zone_limit);
 	if (connections > per_zone_limit)
 		return -ENOMEM;
 
@@ -1805,7 +1805,7 @@ static int __ovs_ct_limit_get_zone_limit(struct net *net,
 	nf_ct_zone_init(&ct_zone, zone_id, NF_CT_DEFAULT_ZONE_DIR, 0);
 
 	zone_limit.count = nf_conncount_count_skb(net, NULL, 0, data,
-						  &conncount_key);
+						  &conncount_key, 0);
 	return nla_put_nohdr(reply, sizeof(zone_limit), &zone_limit);
 }
 

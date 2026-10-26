@@ -23,7 +23,8 @@ unsigned int nf_conncount_count_skb(struct net *net,
 				    const struct sk_buff *skb,
 				    u16 l3num,
 				    struct nf_conncount_data *data,
-				    const u32 *key);
+				    const u32 *key,
+				    unsigned int limit);
 
 int nf_conncount_add_skb(struct net *net, const struct sk_buff *skb,
 			 u16 l3num, struct nf_conncount_list *list);

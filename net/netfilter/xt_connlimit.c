@@ -63,7 +63,7 @@ connlimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 		key[1] = zone->id;
 	}
 
-	connections = nf_conncount_count_skb(net, skb, xt_family(par), info->data, key);
+	connections = nf_conncount_count_skb(net, skb, xt_family(par), info->data, key, 0);
 	if (connections == 0)
 		/* kmalloc failed or tuple couldn't be found, drop it entirely */
 		goto hotdrop;

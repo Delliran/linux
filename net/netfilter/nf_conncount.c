@@ -563,11 +563,12 @@ count_tree(struct net *net,
 	   const struct sk_buff *skb,
 	   u16 l3num,
 	   struct nf_conncount_data *data,
-	   const u32 *key)
+	   const u32 *key,
+	   unsigned int limit)
 {
 	struct nf_conncount_root *root;
 	struct nf_conncount_rb *rbconn;
-	unsigned int hash;
+	unsigned int count, hash;
 	int ret;
 
 	hash = jhash2(key, data->keylen, data->initval) % CONNCOUNT_SLOTS;
@@ -597,6 +598,18 @@ count_tree(struct net *net,
 	if (!skb) {
 		nf_conncount_gc_list(net, &rbconn->list);
 		return rbconn->list.count;
+	}
+
+	/* The caller rejects new connections above @limit, so there is no
+	 * point in recording this one or in serializing on list_lock for
+	 * it. Run gc so that the count keeps following the real number of
+	 * connections while nothing is being added.
+	 */
+	if (limit && READ_ONCE(rbconn->list.count) > limit) {
+		nf_conncount_gc_list(net, &rbconn->list);
+		count = READ_ONCE(rbconn->list.count);
+		if (count > limit)
+			return count;
 	}
 
 	spin_lock_bh(&rbconn->list.list_lock);
@@ -692,14 +705,20 @@ static void tree_gc_worker(struct work_struct *work)
  * If 'skb' is not null, insert the corresponding tuple into the accounting
  * data structure. Call with RCU read lock.
  */
+/* Count the connections sharing @key, adding the one @skb belongs to.
+ *
+ * A non-zero @limit tells that the caller will reject the connection when
+ * the count exceeds it. In that case the connection is not recorded once
+ * the list is above the limit and the current count is returned instead.
+ */
 unsigned int nf_conncount_count_skb(struct net *net,
 				    const struct sk_buff *skb,
 				    u16 l3num,
 				    struct nf_conncount_data *data,
-				    const u32 *key)
+				    const u32 *key,
+				    unsigned int limit)
 {
-	return count_tree(net, skb, l3num, data, key);
-
+	return count_tree(net, skb, l3num, data, key, limit);
 }
 EXPORT_SYMBOL_GPL(nf_conncount_count_skb);
 
